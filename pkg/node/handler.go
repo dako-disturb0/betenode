@@ -267,7 +267,7 @@ func (h *Handler) VbetaLyricsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.lyricsService.FetchLyrics(title, author, provider)
+	res, err := h.lyricsService.FetchRawLyrics(title, author, provider)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -278,14 +278,14 @@ func (h *Handler) VbetaLyricsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Type", res.ContentType)
 	if res.Cached {
-		w.Header().Set("X-BetterLyrics-Cache", "HIT-VBETA-NODE")
+		w.Header().Set("X-BetterLyrics-Cache", "HIT-VBETA-RAW-NODE")
 	} else {
-		w.Header().Set("X-BetterLyrics-Cache", "MISS-VBETA-NODE")
+		w.Header().Set("X-BetterLyrics-Cache", "MISS-VBETA-RAW-NODE")
 	}
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(res)
+	w.WriteHeader(res.StatusCode)
+	_, _ = w.Write(res.Body)
 }
 
 func enableCORS(w http.ResponseWriter) {

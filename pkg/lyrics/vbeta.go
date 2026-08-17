@@ -1,7 +1,6 @@
 package lyrics
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,18 +12,12 @@ import (
 	"github.com/betterlyrics/bete-node/pkg/upstream"
 )
 
-// LyricsResponse is the structured JSON output of /vbeta/lyrics
-type LyricsResponse struct {
-	Status       string                 `json:"status"`
-	Source       string                 `json:"source"`
-	Title        string                 `json:"title"`
-	Author       string                 `json:"author"`
-	Album        string                 `json:"album,omitempty"`
-	Duration     int                    `json:"duration_seconds,omitempty"`
-	SyncedLyrics string                 `json:"synced_lyrics,omitempty"`
-	PlainLyrics  string                 `json:"plain_lyrics,omitempty"`
-	Cached       bool                   `json:"cached"`
-	Raw          map[string]interface{} `json:"raw,omitempty"`
+// RawResponse holds the pure upstream byte response and content-type
+type RawResponse struct {
+	Body        []byte
+	ContentType string
+	StatusCode  int
+	Cached      bool
 }
 
 // Service manages multi-provider direct lyrics retrieval
@@ -41,38 +34,41 @@ func NewService(memCache *cache.MemoryCache) *Service {
 	}
 }
 
-// FetchLyrics queries available providers for the requested song
-func (s *Service) FetchLyrics(title, author, provider string) (*LyricsResponse, error) {
+// FetchRawLyrics queries available providers and returns the exact raw payload from upstream
+func (s *Service) FetchRawLyrics(title, author, provider string) (*RawResponse, error) {
 	title = cleanString(title)
 	author = cleanString(author)
 	provider = strings.ToLower(strings.TrimSpace(provider))
 
-	cacheKey := fmt.Sprintf("vbeta:%s|%s|%s", title, author, provider)
+	cacheKey := fmt.Sprintf("vbeta_raw:%s|%s|%s", title, author, provider)
 
-	// Check cache
+	// Check cache for instant replay (< 1ms)
 	if item, found := s.cache.Get(cacheKey); found {
-		var cachedResp LyricsResponse
-		if err := json.Unmarshal(item.Value, &cachedResp); err == nil {
-			cachedResp.Cached = true
-			return &cachedResp, nil
+		ct := item.Header.Get("Content-Type")
+		if ct == "" {
+			ct = "application/json; charset=utf-8"
 		}
+		return &RawResponse{
+			Body:        item.Value,
+			ContentType: ct,
+			StatusCode:  http.StatusOK,
+			Cached:      true,
+		}, nil
 	}
 
-	var res *LyricsResponse
+	var res *RawResponse
 	var err error
 
-	// Route based on requested provider
 	switch provider {
 	case "unison":
-		res, err = s.fetchFromUnison(title, author)
+		res, err = s.fetchRawUnison(title, author)
 	case "lrclib":
-		res, err = s.fetchFromLRCLIB(title, author)
-	default: // "auto" or empty
-		// Try LRCLib first (fastest open database)
-		res, err = s.fetchFromLRCLIB(title, author)
-		if err != nil || (res != nil && res.SyncedLyrics == "" && res.PlainLyrics == "") {
-			// Fallback to Unison
-			if uRes, uErr := s.fetchFromUnison(title, author); uErr == nil && (uRes.SyncedLyrics != "" || uRes.PlainLyrics != "") {
+		res, err = s.fetchRawLRCLIB(title, author)
+	default: // "auto"
+		// Default to LRCLib raw, fallback to Unison raw
+		res, err = s.fetchRawLRCLIB(title, author)
+		if err != nil || (res != nil && res.StatusCode != http.StatusOK) {
+			if uRes, uErr := s.fetchRawUnison(title, author); uErr == nil && uRes.StatusCode == http.StatusOK {
 				res = uRes
 				err = nil
 			}
@@ -83,28 +79,26 @@ func (s *Service) FetchLyrics(title, author, provider string) (*LyricsResponse, 
 		return nil, err
 	}
 
-	if res == nil || (res.SyncedLyrics == "" && res.PlainLyrics == "") {
-		return &LyricsResponse{
-			Status: "not_found",
-			Source: provider,
-			Title:  title,
-			Author: author,
+	if res == nil {
+		return &RawResponse{
+			Body:        []byte(`{"error":true,"message":"Lyrics not found"}`),
+			ContentType: "application/json; charset=utf-8",
+			StatusCode:  http.StatusNotFound,
 		}, nil
 	}
 
-	res.Status = "success"
-	res.Cached = false
-
-	// Save to cache
-	if bytesVal, mErr := json.Marshal(res); mErr == nil {
-		s.cache.Set(cacheKey, bytesVal, nil, 24*time.Hour)
+	// Cache successful upstream response
+	if res.StatusCode == http.StatusOK && len(res.Body) > 0 {
+		header := make(http.Header)
+		header.Set("Content-Type", res.ContentType)
+		s.cache.Set(cacheKey, res.Body, header, 48*time.Hour)
 	}
 
 	return res, nil
 }
 
-// fetchFromLRCLIB fetches lyrics from lrclib.net
-func (s *Service) fetchFromLRCLIB(title, author string) (*LyricsResponse, error) {
+// fetchRawLRCLIB retrieves pure 1:1 JSON from lrclib.net
+func (s *Service) fetchRawLRCLIB(title, author string) (*RawResponse, error) {
 	apiURL := fmt.Sprintf("https://lrclib.net/api/get?track_name=%s&artist_name=%s",
 		url.QueryEscape(title),
 		url.QueryEscape(author),
@@ -114,7 +108,7 @@ func (s *Service) fetchFromLRCLIB(title, author string) (*LyricsResponse, error)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "BetterLyrics-Accelerator/1.0.0 (https://github.com/dako-disturb0/betenode)")
+	req.Header.Set("User-Agent", "BetterLyrics/1.0.0 (https://github.com/dako-disturb0/betenode)")
 
 	resp, err := s.client.HTTPClient.Do(req)
 	if err != nil {
@@ -123,12 +117,8 @@ func (s *Service) fetchFromLRCLIB(title, author string) (*LyricsResponse, error)
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		// Try search endpoint if exact match fails
-		return s.searchLRCLIB(title, author)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("LRCLib returned status: %d", resp.StatusCode)
+		// Fallback to lrclib search query
+		return s.searchRawLRCLIB(title, author)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -136,32 +126,20 @@ func (s *Service) fetchFromLRCLIB(title, author string) (*LyricsResponse, error)
 		return nil, err
 	}
 
-	var data struct {
-		TrackName    string  `json:"trackName"`
-		ArtistName   string  `json:"artistName"`
-		AlbumName    string  `json:"albumName"`
-		Duration     float64 `json:"duration"`
-		SyncedLyrics string  `json:"syncedLyrics"`
-		PlainLyrics  string  `json:"plainLyrics"`
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json; charset=utf-8"
 	}
 
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, err
-	}
-
-	return &LyricsResponse{
-		Source:       "LRCLIB",
-		Title:        data.TrackName,
-		Author:       data.ArtistName,
-		Album:        data.AlbumName,
-		Duration:     int(data.Duration),
-		SyncedLyrics: data.SyncedLyrics,
-		PlainLyrics:  data.PlainLyrics,
+	return &RawResponse{
+		Body:        body,
+		ContentType: ct,
+		StatusCode:  resp.StatusCode,
+		Cached:      false,
 	}, nil
 }
 
-// searchLRCLIB fallback search endpoint
-func (s *Service) searchLRCLIB(title, author string) (*LyricsResponse, error) {
+func (s *Service) searchRawLRCLIB(title, author string) (*RawResponse, error) {
 	q := strings.TrimSpace(title + " " + author)
 	apiURL := fmt.Sprintf("https://lrclib.net/api/search?q=%s", url.QueryEscape(q))
 
@@ -169,7 +147,7 @@ func (s *Service) searchLRCLIB(title, author string) (*LyricsResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "BetterLyrics-Accelerator/1.0.0 (https://github.com/dako-disturb0/betenode)")
+	req.Header.Set("User-Agent", "BetterLyrics/1.0.0")
 
 	resp, err := s.client.HTTPClient.Do(req)
 	if err != nil {
@@ -177,42 +155,26 @@ func (s *Service) searchLRCLIB(title, author string) (*LyricsResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("LRCLib search status: %d", resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	var list []struct {
-		TrackName    string  `json:"trackName"`
-		ArtistName   string  `json:"artistName"`
-		AlbumName    string  `json:"albumName"`
-		Duration     float64 `json:"duration"`
-		SyncedLyrics string  `json:"syncedLyrics"`
-		PlainLyrics  string  `json:"plainLyrics"`
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json; charset=utf-8"
 	}
 
-	if err := json.Unmarshal(body, &list); err != nil || len(list) == 0 {
-		return nil, nil
-	}
-
-	first := list[0]
-	return &LyricsResponse{
-		Source:       "LRCLIB",
-		Title:        first.TrackName,
-		Author:       first.ArtistName,
-		Album:        first.AlbumName,
-		Duration:     int(first.Duration),
-		SyncedLyrics: first.SyncedLyrics,
-		PlainLyrics:  first.PlainLyrics,
+	return &RawResponse{
+		Body:        body,
+		ContentType: ct,
+		StatusCode:  resp.StatusCode,
+		Cached:      false,
 	}, nil
 }
 
-// fetchFromUnison fetches lyrics from Unison API
-func (s *Service) fetchFromUnison(title, author string) (*LyricsResponse, error) {
+// fetchRawUnison retrieves pure 1:1 JSON from Unison
+func (s *Service) fetchRawUnison(title, author string) (*RawResponse, error) {
 	apiURL := fmt.Sprintf("https://unison.boidu.dev/lyrics?title=%s&artist=%s",
 		url.QueryEscape(title),
 		url.QueryEscape(author),
@@ -222,7 +184,7 @@ func (s *Service) fetchFromUnison(title, author string) (*LyricsResponse, error)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "BetterLyrics-Accelerator/1.0.0")
+	req.Header.Set("User-Agent", "BetterLyrics/1.0.0")
 
 	resp, err := s.client.HTTPClient.Do(req)
 	if err != nil {
@@ -230,36 +192,21 @@ func (s *Service) fetchFromUnison(title, author string) (*LyricsResponse, error)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Unison API status: %d", resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	var data map[string]interface{}
-	_ = json.Unmarshal(body, &data)
-
-	synced := ""
-	plain := ""
-
-	if s, ok := data["lyrics"].(string); ok {
-		if strings.Contains(s, "[") && strings.Contains(s, "]") {
-			synced = s
-		} else {
-			plain = s
-		}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json; charset=utf-8"
 	}
 
-	return &LyricsResponse{
-		Source:       "Unison",
-		Title:        title,
-		Author:       author,
-		SyncedLyrics: synced,
-		PlainLyrics:  plain,
-		Raw:          data,
+	return &RawResponse{
+		Body:        body,
+		ContentType: ct,
+		StatusCode:  resp.StatusCode,
+		Cached:      false,
 	}, nil
 }
 
