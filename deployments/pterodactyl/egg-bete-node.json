@@ -1,0 +1,69 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY BETE-NODE EXPORTER",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-08-17T16:30:00Z",
+    "name": "BetterLyrics Node Accelerator",
+    "author": "dev@betterlyrics.org",
+    "description": "High-performance edge node and origin orchestrator for BetterLyrics.",
+    "features": null,
+    "docker_images": {
+        "Golang 1.24 (Alpine)": "ghcr.io/parkervcp/yolks:go_1.24",
+        "Debian Generic": "ghcr.io/parkervcp/yolks:debian"
+    },
+    "file_denylist": [],
+    "startup": "./bete-node",
+    "config": {
+        "files": "{}",
+        "startup": "{\r\n    \"done\": \"BetterLyrics\"\r\n}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\r\ncd /home/container\r\necho \"Installing Bete-Node...\"\r\nif [ -f \"bete-node/cmd/app/main.go\" ]; then\r\n    cd bete-node && go build -ldflags=\"-s -w\" -o ../bete-node ./cmd/app && cd ..\r\nfi\r\nchmod +x bete-node\r\necho \"Installation complete!\"",
+            "container": "golang:1.24-alpine",
+            "entrypoint": "ash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Operating Mode",
+            "description": "Mode to run: auto, origin, or node",
+            "env_variable": "MODE",
+            "default_value": "auto",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:auto,origin,node"
+        },
+        {
+            "name": "Upstream Official URL",
+            "description": "Upstream lyrics origin URL",
+            "env_variable": "UPSTREAM_URL",
+            "default_value": "https://lyrics.api.dacubeking.com",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string"
+        },
+        {
+            "name": "Dynamic Node 1",
+            "description": "Optional Edge Node 1 URL for origin mode",
+            "env_variable": "NODE1",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string"
+        },
+        {
+            "name": "Dynamic Node 2",
+            "description": "Optional Edge Node 2 URL for origin mode",
+            "env_variable": "NODE2",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string"
+        }
+    ]
+}

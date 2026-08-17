@@ -1,0 +1,23 @@
+name: bete-node
+type: web
+env:
+  - key: MODE
+    value: node
+  - key: UPSTREAM_URL
+    value: https://lyrics.api.dacubeking.com
+  - key: CACHE_TTL_SECONDS
+    value: "259200"
+ports:
+  - port: 8080
+    protocol: http
+    public: true
+regions:
+  - sin
+  - fra
+  - was
+routes:
+  - path: /
+    port: 8080
+scalings:
+  min: 1
+  max: 2

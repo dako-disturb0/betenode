@@ -1,0 +1,18 @@
+services:
+  bete-node:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: bete-node
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - MODE=auto
+      - PORT=8080
+      - UPSTREAM_URL=https://lyrics.api.dacubeking.com
+      - CACHE_TTL_SECONDS=259200
+      # - NODE1=https://node1.example.com/interconnect
+      # - NODE2=https://node2.example.com/interconnect
+    env_file:
+      - ../../.env

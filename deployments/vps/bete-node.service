@@ -1,0 +1,17 @@
+[Unit]
+Description=BetterLyrics Accelerator Node & Origin Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/bete-node
+ExecStart=/opt/bete-node/bete-node
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

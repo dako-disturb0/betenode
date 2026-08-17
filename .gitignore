@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bete-node
+
+# Test & Build caches
+/dist/
+/.gotmp/
+/tmp/
+*.out
+*.test
+
+# Environment files with secrets
+.env
+.env.local
+
+# IDE & OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
