@@ -75,7 +75,7 @@ bete-node/
 │       └── main.go                 # Standalone binary khusus Edge Node
 ├── api/
 │   └── index.go                    # Serverless adapter (Vercel & Netlify)
-├── internal/
+├── pkg/
 │   ├── config/
 │   │   └── config.go               # Multi-path .env loader & NODE[N] parser
 │   ├── platform/

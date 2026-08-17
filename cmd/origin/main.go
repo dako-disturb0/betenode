@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/betterlyrics/bete-node/internal/cache"
-	"github.com/betterlyrics/bete-node/internal/config"
-	"github.com/betterlyrics/bete-node/internal/origin"
+	"github.com/betterlyrics/bete-node/pkg/cache"
+	"github.com/betterlyrics/bete-node/pkg/config"
+	"github.com/betterlyrics/bete-node/pkg/origin"
 )
 
 func main() {

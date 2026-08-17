@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/betterlyrics/bete-node/internal/config"
-	"github.com/betterlyrics/bete-node/internal/node"
-	"github.com/betterlyrics/bete-node/internal/upstream"
+	"github.com/betterlyrics/bete-node/pkg/config"
+	"github.com/betterlyrics/bete-node/pkg/node"
+	"github.com/betterlyrics/bete-node/pkg/upstream"
 )
 
 // NodeHealth tracks the health and latency score of a node

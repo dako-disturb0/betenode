@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/betterlyrics/bete-node/internal/platform"
+	"github.com/betterlyrics/bete-node/pkg/platform"
 )
 
 // Mode represents running mode of the binary
