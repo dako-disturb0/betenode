@@ -57,13 +57,19 @@ func LoadConfig(customEnvPath string) (*Config, error) {
 
 	loadedEnvPath := discoverAndLoadEnv(customEnvPath)
 
+	// Port resolution: PORT env/.env > SERVER_PORT > Platform Default
+	resolvedPort := getEnvOrDefault("PORT", "")
+	if resolvedPort == "" {
+		resolvedPort = getEnvOrDefault("SERVER_PORT", platInfo.DefaultPort)
+	}
+
 	cfg := &Config{
 		Platform:     platInfo,
 		LoadedEnv:    loadedEnvPath,
 		Mode:         ModeAuto,
 		Role:         getEnvOrDefault("ROLE", "auto"),
 		Host:         getEnvOrDefault("HOST", "0.0.0.0"),
-		Port:         getEnvOrDefault("PORT", platInfo.DefaultPort),
+		Port:         resolvedPort,
 		UpstreamURL:  getEnvOrDefault("UPSTREAM_URL", "https://lyrics.api.dacubeking.com"),
 		OriginURL:    getEnvOrDefault("ORIGIN_URL", ""),
 		NodeSecret:   getEnvOrDefault("NODE_SECRET", "betterlyrics-interconnect-key"),
@@ -71,11 +77,6 @@ func LoadConfig(customEnvPath string) (*Config, error) {
 		CacheMaxKeys: getEnvAsInt("CACHE_MAX_ITEMS", 50000),
 		AutoHealth:   getEnvAsBool("AUTO_HEALTHCHECK", true),
 		HealthSec:    getEnvAsInt("HEALTHCHECK_INTERVAL_SEC", 15),
-	}
-
-	// Pterodactyl override port if SERVER_PORT is present
-	if srvPort := os.Getenv("SERVER_PORT"); srvPort != "" {
-		cfg.Port = srvPort
 	}
 
 	// Determine Mode
@@ -174,10 +175,7 @@ func loadEnvFile(filePath string) {
 				(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
 				v = v[1 : len(v)-1]
 			}
-			// Only set if not already set in OS environment
-			if os.Getenv(k) == "" {
-				_ = os.Setenv(k, v)
-			}
+			_ = os.Setenv(k, v)
 		}
 	}
 }
