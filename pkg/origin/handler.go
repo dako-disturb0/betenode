@@ -14,6 +14,7 @@ import (
 
 	"github.com/betterlyrics/bete-node/pkg/cache"
 	"github.com/betterlyrics/bete-node/pkg/config"
+	"github.com/betterlyrics/bete-node/pkg/lyrics"
 	"github.com/betterlyrics/bete-node/pkg/upstream"
 )
 
@@ -24,6 +25,7 @@ type Handler struct {
 	pool           *NodePool
 	upstreamClient *upstream.Client
 	nodeClient     *upstream.Client
+	lyricsService  *lyrics.Service
 	startTime      time.Time
 }
 
@@ -35,6 +37,7 @@ func NewHandler(cfg *config.Config, memCache *cache.MemoryCache, pool *NodePool)
 		pool:           pool,
 		upstreamClient: upstream.NewClient(cfg.UpstreamURL, 30*time.Second),
 		nodeClient:     upstream.NewClient("", 25*time.Second),
+		lyricsService:  lyrics.NewService(memCache),
 		startTime:      time.Now(),
 	}
 }
@@ -231,6 +234,67 @@ func (h *Handler) TurnstileProxyHandler(w http.ResponseWriter, r *http.Request) 
 	_, _ = io.Copy(w, resp.Body)
 }
 
+// VbetaLyricsHandler handles direct GET /vbeta/lyrics/ queries
+func (h *Handler) VbetaLyricsHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	q := r.URL.Query()
+	title := q.Get("title")
+	if title == "" {
+		title = q.Get("song")
+	}
+	if title == "" {
+		title = q.Get("track")
+	}
+
+	author := q.Get("author")
+	if author == "" {
+		author = q.Get("artist")
+	}
+
+	provider := q.Get("provider")
+	// If provider is specified in path like /vbeta/lyrics/lrclib or /vbeta/lyrics/unison
+	trimmedPath := strings.Trim(strings.TrimPrefix(r.URL.Path, "/vbeta/lyrics"), "/")
+	if trimmedPath != "" && provider == "" {
+		provider = trimmedPath
+	}
+
+	if title == "" && author == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   true,
+			"message": "Missing required query parameters. Usage: /vbeta/lyrics/?title=\"night dancer\"&author=\"imase\"/(provider)",
+			"example": "/vbeta/lyrics/?title=night%20dancer&author=imase",
+		})
+		return
+	}
+
+	res, err := h.lyricsService.FetchLyrics(title, author, provider)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   true,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if res.Cached {
+		w.Header().Set("X-BetterLyrics-Cache", "HIT-VBETA")
+	} else {
+		w.Header().Set("X-BetterLyrics-Cache", "MISS-VBETA")
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(res)
+}
+
 func enableCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
@@ -253,6 +317,8 @@ func NewServer(cfg *config.Config, memCache *cache.MemoryCache) *Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/v2/lyrics", h.LyricsHandler)
+	mux.HandleFunc("/vbeta/lyrics", h.VbetaLyricsHandler)
+	mux.HandleFunc("/vbeta/lyrics/", h.VbetaLyricsHandler)
 	mux.HandleFunc("/verify-turnstile", h.TurnstileProxyHandler)
 	mux.HandleFunc("/nodes", h.NodesHandler)
 	mux.HandleFunc("/status", h.NodesHandler)

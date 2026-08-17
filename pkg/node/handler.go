@@ -15,6 +15,7 @@ import (
 
 	"github.com/betterlyrics/bete-node/pkg/cache"
 	"github.com/betterlyrics/bete-node/pkg/config"
+	"github.com/betterlyrics/bete-node/pkg/lyrics"
 	"github.com/betterlyrics/bete-node/pkg/upstream"
 )
 
@@ -34,19 +35,21 @@ type InterconnectStatus struct {
 
 // Handler contains logic for edge node proxying
 type Handler struct {
-	cfg       *config.Config
-	cache     *cache.MemoryCache
-	client    *upstream.Client
-	startTime time.Time
+	cfg           *config.Config
+	cache         *cache.MemoryCache
+	client        *upstream.Client
+	lyricsService *lyrics.Service
+	startTime     time.Time
 }
 
 // NewHandler initializes a Node handler
 func NewHandler(cfg *config.Config, memCache *cache.MemoryCache) *Handler {
 	return &Handler{
-		cfg:       cfg,
-		cache:     memCache,
-		client:    upstream.NewClient(cfg.UpstreamURL, 30*time.Second),
-		startTime: time.Now(),
+		cfg:           cfg,
+		cache:         memCache,
+		client:        upstream.NewClient(cfg.UpstreamURL, 30*time.Second),
+		lyricsService: lyrics.NewService(memCache),
+		startTime:     time.Now(),
 	}
 }
 
@@ -225,6 +228,66 @@ func (h *Handler) TurnstileProxyHandler(w http.ResponseWriter, r *http.Request) 
 	_, _ = io.Copy(w, resp.Body)
 }
 
+// VbetaLyricsHandler handles direct GET /vbeta/lyrics/ queries on Node
+func (h *Handler) VbetaLyricsHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	q := r.URL.Query()
+	title := q.Get("title")
+	if title == "" {
+		title = q.Get("song")
+	}
+	if title == "" {
+		title = q.Get("track")
+	}
+
+	author := q.Get("author")
+	if author == "" {
+		author = q.Get("artist")
+	}
+
+	provider := q.Get("provider")
+	trimmedPath := strings.Trim(strings.TrimPrefix(r.URL.Path, "/vbeta/lyrics"), "/")
+	if trimmedPath != "" && provider == "" {
+		provider = trimmedPath
+	}
+
+	if title == "" && author == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   true,
+			"message": "Missing required query parameters. Usage: /vbeta/lyrics/?title=\"night dancer\"&author=\"imase\"/(provider)",
+			"example": "/vbeta/lyrics/?title=night%20dancer&author=imase",
+		})
+		return
+	}
+
+	res, err := h.lyricsService.FetchLyrics(title, author, provider)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   true,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if res.Cached {
+		w.Header().Set("X-BetterLyrics-Cache", "HIT-VBETA-NODE")
+	} else {
+		w.Header().Set("X-BetterLyrics-Cache", "MISS-VBETA-NODE")
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(res)
+}
+
 func enableCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
@@ -246,6 +309,8 @@ func NewServer(cfg *config.Config, memCache *cache.MemoryCache) *Server {
 
 	mux.HandleFunc("/interconnect", h.InterconnectHandler)
 	mux.HandleFunc("/v2/lyrics", h.LyricsHandler)
+	mux.HandleFunc("/vbeta/lyrics", h.VbetaLyricsHandler)
+	mux.HandleFunc("/vbeta/lyrics/", h.VbetaLyricsHandler)
 	mux.HandleFunc("/verify-turnstile", h.TurnstileProxyHandler)
 	mux.HandleFunc("/health", h.HealthHandler)
 	mux.HandleFunc("/ping", h.HealthHandler)
