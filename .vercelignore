@@ -1,0 +1,19 @@
+# Blacklist GAS (Google Apps Script) from Vercel
+GAS/
+gas/
+
+# Ignore documentation & non-serverless files
+*.md
+PROJECT.md
+README.md
+
+# Ignore other deployment targets
+deployments/
+
+# Ignore local environment & builds
+.env*
+.gotmp/
+/bin/
+Makefile
+Dockerfile
+docker-compose*

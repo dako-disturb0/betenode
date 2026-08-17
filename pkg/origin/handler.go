@@ -110,7 +110,11 @@ func (h *Handler) LyricsHandler(w http.ResponseWriter, r *http.Request) {
 	targetURL := ""
 	routedNode := h.pool.GetBestNode()
 	if routedNode != nil {
-		targetURL = fmt.Sprintf("%s/v2/lyrics", strings.TrimRight(routedNode.Endpoint.BaseURL, "/"))
+		if strings.HasSuffix(routedNode.Endpoint.BaseURL, "/exec") {
+			targetURL = fmt.Sprintf("%s?path=v2/lyrics", routedNode.Endpoint.BaseURL)
+		} else {
+			targetURL = fmt.Sprintf("%s/v2/lyrics", strings.TrimRight(routedNode.Endpoint.BaseURL, "/"))
+		}
 	} else {
 		// No healthy nodes, fallback directly to official upstream
 		targetURL = fmt.Sprintf("%s/v2/lyrics", strings.TrimRight(h.cfg.UpstreamURL, "/"))

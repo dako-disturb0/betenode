@@ -254,8 +254,14 @@ func normalizeNodeURL(raw string) (baseURL string, interPath string) {
 		return strings.TrimRight(raw, "/"), "/interconnect"
 	}
 
-	base := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+	// If the URL has a deep path like Google Apps Script (/macros/s/.../exec)
 	path := strings.TrimRight(u.Path, "/")
+	if strings.HasSuffix(path, "/exec") || strings.Contains(path, "/macros/s/") {
+		base := fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, path)
+		return base, "?path=interconnect"
+	}
+
+	base := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 	if path == "" {
 		path = "/interconnect"
 	}
