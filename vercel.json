@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.go",
+      "use": "@vercel/go"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/index.go"
+    }
+  ],
+  "env": {
+    "MODE": "node",
+    "ROLE": "node",
+    "UPSTREAM_URL": "https://lyrics.api.dacubeking.com"
+  }
+}
